@@ -118,21 +118,14 @@ def evaluate(data_source, test_pos_tags):
 
         output, hidden = model(data, hidden)
         output_flat = output.view(-1, ntokens)
-        loss = criterion(output_flat, targets)
-        cur_loss += loss
-        total_loss += loss
+        total_loss += criterion(output_flat, targets)
 
         hidden = repackage_hidden(hidden)
 
-        if batch % args.log_interval == 0 and batch > 0:
-            cur_loss = cur_loss.data[0]
-            average_loss = cur_loss / args.log_interval
-            elapsed = time.time() - start_time
-            print('| {:5d}/{:5d} batches | ms/batch {:5.2f} | {{:5.2f}} loss |'.format(
-                    batch, num_batches, elapsed * 1000 / args.log_interval, average_loss))
-            cur_loss = 0
-
-            start_time = time.time()
+    elapsed = time.time() - start_time
+    print('| {:5d} batches | ms/batch {:5.2f} |'.format(
+            num_batches, elapsed * 1000 / num_batches))
+    cur_loss = 0
 
     return {'loss': total_loss.data[0] / num_batches}
 
