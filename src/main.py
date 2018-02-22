@@ -13,6 +13,7 @@ import ast
 import json
 
 import data
+import hooks
 
 parser = argparse.ArgumentParser(description='Evaluate language model semantic and syntactic features')
 
@@ -36,7 +37,6 @@ parser.add_argument('--original-src', type=str,
 parser.add_argument('--bptt', type=int, default=35,
                     help='sequence length')
 parser.add_argument('--batch-size', type=int, default=60)
-parser.add_argument('--log-interval', type=int, default=200)
 parser.add_argument('--test-length', type=int, default=None,
                     help='number of lines to test in the test corpus')
 
@@ -111,28 +111,19 @@ def evaluate(data_source, test_pos_tags):
     hidden = model.init_hidden(args.batch_size)
     num_batches = len(data_source) // args.bptt
     total_loss = 0
-    cur_loss = 0
     for batch,i in enumerate(range(0, data_source.size(0) - 1, args.bptt)):
         data, targets = get_batch(data_source, i)
         target_pos_tags = get_pos_batch(test_pos_tags, i)
 
         output, hidden = model(data, hidden)
         output_flat = output.view(-1, ntokens)
-        loss = criterion(output_flat, targets)
-        cur_loss += loss
-        total_loss += loss
+        total_loss += criterion(output_flat, targets)
 
         hidden = repackage_hidden(hidden)
 
-        if batch % args.log_interval == 0 and batch > 0:
-            cur_loss = cur_loss.data[0]
-            average_loss = cur_loss / args.log_interval
-            elapsed = time.time() - start_time
-            print('| {:5d}/{:5d} batches | ms/batch {:5.2f} | {{:5.2f}} loss |'.format(
-                    batch, num_batches, elapsed * 1000 / args.log_interval, average_loss))
-            cur_loss = 0
-
-            start_time = time.time()
+    elapsed = time.time() - start_time
+    print('| {:5d} batches | ms/batch {:5.2f} |'.format(
+            num_batches, elapsed * 1000 / num_batches))
 
     return {'loss': total_loss.data[0] / num_batches}
 
