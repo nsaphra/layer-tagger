@@ -24,10 +24,10 @@ parser.add_argument('--cuda', action='store_true',
                     help='use CUDA')
 parser.add_argument('--seed', type=int, default=1111,
                     help='random seed')
-parser.add_argument('--vocab', type=str,
-                    help='vocab file')
+parser.add_argument('--vocab-file', type=str,
+                    help='location of newline-separated list of all words sorted by index')
 parser.add_argument('--train-file', type=str,
-                    help='location of the valid and test data corpus')
+                    help='location of the train data corpus')
 parser.add_argument('--valid-file', type=str,
                     help='location of the valid data corpus')
 parser.add_argument('--test-file', type=str,
@@ -129,6 +129,9 @@ def evaluate(data_source, test_pos_tags):
 
 # Run on test data.
 print("test data size ", test_data.size())
+
+investigator = hooks.NetworkLayerInvestigator(model, corpus.dictionary, corpus.dictionary, args.batch_size, args.bptt)
+investigator.add_model_hooks(evaluation=False, data_source=test_data)
 
 test_stats = evaluate(test_data, test_pos_tags)
 print('=' * 89)
