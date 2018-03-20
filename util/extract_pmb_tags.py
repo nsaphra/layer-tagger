@@ -1,5 +1,11 @@
 # -*- coding: utf-8 -*-
 
+"""
+Process xml files from [1] into separate token and tag files.
+
+[1] Abzianidze, Lasha, et al. "The parallel meaning bank: Towards a multilingual corpus of translations annotated with compositional meaning representations." arXiv preprint arXiv:1702.03964 (2017).
+"""
+
 import xml.etree.ElementTree as ET
 from pathlib import Path
 import argparse

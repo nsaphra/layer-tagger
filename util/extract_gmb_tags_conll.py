@@ -1,3 +1,11 @@
+# -*- coding: utf-8 -*-
+
+"""
+Process conll files from [1] into separate token and tag files.
+
+[1] Bjerva, Johannes, Barbara Plank, and Johan Bos. "Semantic tagging with deep residual networks." arXiv preprint arXiv:1609.07053 (2016).
+"""
+
 from pathlib import Path
 import argparse
 import sys
