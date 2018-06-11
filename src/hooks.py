@@ -5,18 +5,27 @@ from torch.autograd import Variable
 
 import data
 
-class LayerTagger(nn.Module):
-    def __init__(self, key, input_size, output_vocab, hidden_size=None, dropout=0.5):
-        super(LayerTagger, self).__init__()
+class TaggerHook:
+    def __init__(self, key, module, output_vocab, hidden_size=None, dropout=0.5):
+        print(key)
+        self.module = module
+        self.input_size = NetworkLayerInvestigator.module_output_size(module)
+        self.output_size = len(output_vocab)
         if hidden_size is None:
-            hidden_size = input_size  # as specified in belinkov et al.
-        output_size = len(output_vocab.idx2word)
-        self.encode = nn.Linear(input_size, hidden_size)
-        self.relu = nn.ReLU()
-        self.drop = nn.Dropout(dropout)
-        self.decode = nn.Softmax()
-        self.loss_function = nn.CrossEntropyLoss()
-        # self.optimizer = torch.optim.SGD(model.parameters(), lr=0.001)
+            hidden_size = self.output_size  # as specified in belinkov et al.
+
+        self.tagger = nn.Sequential(
+            nn.Linear(self.input_size, hidden_size),
+            nn.Dropout(dropout),
+            nn.ReLU(),
+            nn.Linear(hidden_size, self.output_size)
+        )
+        self.tagger.cuda()
+
+        print(self.tagger)
+
+        self.criterion = nn.CrossEntropyLoss()
+        self.optimizer = torch.optim.SGD(self.tagger.parameters(), lr=0.001)
 
         self.key = key
         self.handle = None
@@ -25,46 +34,80 @@ class LayerTagger(nn.Module):
         self.num_correct = 0
         self.num_labeled = 0
 
+        self.label_targets = None
+
         #TODO inspect individual label performance
 
-    def forward(self, x):
-        return self.decode(self.drop(self.relu(self.encode(x))))
+    def set_batch(self, label_targets):
+        self.label_targets = label_targets
 
     def training_hook(self, layer, input, output):
-        self.zero_grad()
-        loss = self.loss_function(self(output), label_targets)
+        for activation in output:
+            activation = self.process_activations(activation, self.label_targets)
+            if activation is not None:
+                break  # use the first output that has the correct dimensions
+        if activation is None:
+            return
+
+        # print(activation)
+        self.tagger.requires_grad = True
+        self.optimizer.zero_grad()
+        # TODO make sure gradient is not passed through output
+        prediction = self.tagger(activation)
+        prediction_flat = prediction.view(-1, self.output_size)
+        loss = self.criterion(prediction_flat, self.label_targets)
         loss.backward()
         self.optimizer.step()
 
     def testing_hook(self, layer, input, output):
-        label_output = self(output)
+        for activation in output:
+            activation = self.process_activations(activation, self.label_targets)
+            if activation is not None:
+                break  # use the first output that has the correct dimensions
+        if activation is None:
+            return
+
+        self.tagger.requires_grad = False
+        label_output = self.tagger(output)
         label_predictions = torch.max(label_output.data, 1)
         self.num_labeled += label_targets.size(0)
-        self.cumulative_loss += label_targets.size(0) * self.loss_function(label_output, label_targets).data
-        self.num_correct += (label_output == label_targets).sum()
+        self.cumulative_loss += label_targets.size(0) * self.loss_function(label_output, self.label_targets).data
+        self.num_correct += (label_output == self.label_targets).sum()
 
+    def process_activations(self, activations, sequence):
+        if activations is None:
+            return None
 
-    def dummy_hook(self, layer, input, output):
-        print(layer)
-        print(NetworkLayerInvestigator.module_output_size(layer))
+        if type(activations) is tuple:
+            activations = torch.stack(activations, dim=0)
+
+        if type(activations.data) is not torch.cuda.FloatTensor:
+            return None
+
+        if activations.dim() == 3 and (activations.size(0) * activations.size(1)) == (sequence.size(0)):
+            # activations: sequence_length x batch_size x hidden_size
+            activations = activations.view(sequence.size(0), -1)
+        if activations.size(0) != sequence.size(0) or activations.size(1) != self.input_size:
+            return None
+        # activations: (sequence_length * batch_size) x hidden_size
+
+        return activations
 
     def register_hook(self, module, evaluation=True):
-        if evaluation:
-            self.eval()
+        if self.handle is not None:
             self.handle.remove()
-            # self.handle = module.register_forward_hook(self.testing_hook)
-            self.handle = module.register_forward_hook(self.dummy_hook)
+        if evaluation:
+            self.tagger.eval()
+            self.handle = module.register_forward_hook(self.testing_hook)
         else:
-            self.train()
-            # self.handle = module.register_forward_hook(self.training_hook)
-            self.handle = module.register_forward_hook(self.dummy_hook)
+            self.tagger.train()
+            self.handle = module.register_forward_hook(self.training_hook)
 
 class NetworkLayerInvestigator:
-    def __init__(self, model, input_vocab, output_vocab, batch_size, bptt):
+    def __init__(self, model, output_vocab, batch_size, bptt):
         self.hooks = {}
         self.model = model
         self.output_vocab = output_vocab
-        self.input_vocab = input_vocab
         self.batch_size = batch_size
         self.bptt = bptt
         self.results = {}
@@ -91,37 +134,26 @@ class NetworkLayerInvestigator:
         seq_len = min(self.bptt, len(self.data_source) - 1 - i)
         data = Variable(self.data_source[i:i+seq_len], volatile=self.evaluation)
         target = Variable(self.data_source[i+1:i+1+seq_len].view(-1))
-        label_targets = target
 
-    def add_hooks_recursively(self, parent_module: nn.Module, prefix=''):
-        # add hooks to the modules in a network recursively
-        for module_key, module in parent_module.named_children():
-            module_key = prefix + module_key
+        for key, handle in self.hooks.items():
+            handle.set_batch(target)
+
+    def set_label_batch(self, labels):
+        for key, hook in self.hooks.items():
+            hook.set_batch(labels)
+
+    def add_model_hooks(self, evaluation=False):
+        self.evaluation = evaluation
+        for module_key, module in self.model.named_modules():
             output_size = self.module_output_size(module)
-            # print("output_size", output_size)
             if output_size == 0:
                 continue
-            # if self.evaluation:
-            self.hooks[module_key] = LayerTagger(module_key, self.batch_size, self.output_vocab)
-            self.hooks[module_key].cuda()
 
+            if module_key not in self.hooks:
+                self.hooks[module_key] = TaggerHook(module_key, module, self.output_vocab)
+
+            # TODO use module.apply()
             self.hooks[module_key].register_hook(module, evaluation=self.evaluation)
-            self.add_hooks_recursively(module, prefix=module_key)
-        # alternatively we could have a special case for:
-        #     if torch.nn.modules.rnn.RNNBase in type(module).__bases__:
-        # in which case we would create a module for each rnn layer
-
-    def add_model_hooks(self, data_source, evaluation=False):
-        self.evaluation = evaluation
-        self.model.eval()
-
-        if self.batch_hook is not None:
-            self.batch_hook.remove()
-        self.next_batch = 0
-        self.data_source = data_source
-        self.batch_hook = self.model.register_forward_hook(self.get_batch)
-
-        self.add_hooks_recursively(self.model)
 
     def results_dict(self):
         for key, tagger in self.hooks.items():

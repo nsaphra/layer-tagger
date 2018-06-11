@@ -46,7 +46,7 @@ class Corpus(object):
             self.build_vocab(train_file)
         self.train = self.tokenize(train_file, permutation=permutation)
         self.valid = self.tokenize(valid_file)
-        self.test = self.tokenize(test_file)
+        self.test = self.tokenize(test_file, lines_to_keep=test_length)
 
     def build_vocab(self, path):
         assert os.path.exists(path)
@@ -62,9 +62,9 @@ class Corpus(object):
         assert os.path.exists(path)
         with open(path, 'r', encoding='utf-8') as fh:
             f = fh.readlines()
-            if lines_to_keep is not None:
-                # only keep first lines in file
-                f = f[:lines_to_keep]
+        if lines_to_keep is not None:
+            # only keep first lines in file
+            f = f[:lines_to_keep]
         if permutation is not None:
             f = [f[i] for i in permutation]
 

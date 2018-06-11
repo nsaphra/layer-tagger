@@ -61,7 +61,9 @@ if args.cuda:
 else:
     model.cpu()
 
-corpus = data.Corpus(args.train_file+'.tok', args.valid_file+'.tok', args.test_file+'.tok', vocab_file=args.vocab, test_length=args.test_length)
+model.requires_grad = False
+
+corpus = data.Corpus(args.train_file+'.tok', args.valid_file+'.tok', args.test_file+'.tok', vocab_file=args.vocab_file, test_length=args.test_length)
 
 def batchify(data, bsz, use_cuda=True):
     # Work out how cleanly we can divide the dataset into bsz parts.
@@ -76,7 +78,8 @@ def batchify(data, bsz, use_cuda=True):
 
 def get_batch(source, i):
     seq_len = min(args.bptt, len(source) - 1 - i)
-    data = Variable(source[i:i+seq_len], volatile=True)
+    data = Variable(source[i:i+seq_len])
+    data.requires_grad = False
     target = Variable(source[i+1:i+1+seq_len].view(-1))
     return data, target
 
@@ -97,13 +100,23 @@ test_pos_tags = batchify(pos_corpus.test, args.batch_size)
 
 def get_pos_batch(source, i):
     seq_len = min(args.bptt, len(source) - 1 - i)
-    return source[i+1:i+1+seq_len].view(-1)
+    return Variable(source[i+1:i+1+seq_len].view(-1))
 
 idx2word = corpus.dictionary.idx2word
 word2idx = corpus.dictionary.word2idx
 vocab_size = len(corpus.dictionary.idx2word)
 
 criterion = nn.CrossEntropyLoss()
+
+# Run on test data.
+print("test data size ", test_data.size())
+
+# with open(args.output_vocab, encoding='utf-8') as f:
+#     output_vocab = tagger_data.load()
+
+# output_vocab = pos_corpus.dictionary.idx2word
+
+investigator = hooks.NetworkLayerInvestigator(model, pos_corpus.dictionary, args.batch_size, args.bptt)
 
 def evaluate(data_source, test_pos_tags):
     ntokens = len(corpus.dictionary)
@@ -114,6 +127,7 @@ def evaluate(data_source, test_pos_tags):
     for batch,i in enumerate(range(0, data_source.size(0) - 1, args.bptt)):
         data, targets = get_batch(data_source, i)
         target_pos_tags = get_pos_batch(test_pos_tags, i)
+        investigator.set_label_batch(target_pos_tags)
 
         output, hidden = model(data, hidden)
         output_flat = output.view(-1, ntokens)
@@ -127,11 +141,7 @@ def evaluate(data_source, test_pos_tags):
 
     return {'loss': total_loss.data[0] / num_batches}
 
-# Run on test data.
-print("test data size ", test_data.size())
-
-investigator = hooks.NetworkLayerInvestigator(model, corpus.dictionary, corpus.dictionary, args.batch_size, args.bptt)
-investigator.add_model_hooks(evaluation=False, data_source=test_data)
+investigator.add_model_hooks(evaluation=False)
 
 test_stats = evaluate(test_data, test_pos_tags)
 print('=' * 89)
