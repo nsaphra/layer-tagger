@@ -110,11 +110,6 @@ criterion = nn.CrossEntropyLoss()
 # Run on test data.
 print("test data size ", test_data.size())
 
-# with open(args.output_vocab, encoding='utf-8') as f:
-#     output_vocab = tagger_data.load()
-
-# output_vocab = pos_corpus.dictionary.idx2word
-
 investigator = hooks.NetworkLayerInvestigator(model, pos_corpus.dictionary, args.batch_size, args.bptt)
 
 def evaluate(data_source, test_pos_tags):

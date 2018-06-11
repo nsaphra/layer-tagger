@@ -49,10 +49,8 @@ class TaggerHook:
         if activation is None:
             return
 
-        # print(activation)
         self.tagger.requires_grad = True
         self.optimizer.zero_grad()
-        # TODO make sure gradient is not passed through output
         prediction = self.tagger(activation)
         prediction_flat = prediction.view(-1, self.output_size)
         loss = self.criterion(prediction_flat, self.label_targets)
@@ -91,6 +89,7 @@ class TaggerHook:
             return None
         # activations: (sequence_length * batch_size) x hidden_size
 
+        # rapid activations in a new Variable to block backprop
         return Variable(activations.data)
 
     def register_hook(self, module, evaluation=True):
