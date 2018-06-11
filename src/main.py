@@ -78,8 +78,7 @@ def batchify(data, bsz, use_cuda=True):
 
 def get_batch(source, i):
     seq_len = min(args.bptt, len(source) - 1 - i)
-    data = Variable(source[i:i+seq_len])
-    data.requires_grad = False
+    data = Variable(source[i:i+seq_len], volatile=True)
     target = Variable(source[i+1:i+1+seq_len].view(-1))
     return data, target
 

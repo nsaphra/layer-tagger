@@ -91,7 +91,7 @@ class TaggerHook:
             return None
         # activations: (sequence_length * batch_size) x hidden_size
 
-        return activations
+        return Variable(activations.data)
 
     def register_hook(self, module, evaluation=True):
         if self.handle is not None:
