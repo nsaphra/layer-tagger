@@ -2,11 +2,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
+from os.path import join
 
 import data
 
 class TaggerHook:
-    def __init__(self, key, module, output_vocab, hidden_size=None, dropout=0.5):
+    def __init__(self, key, module, output_vocab, save_prefix, hidden_size=None, dropout=0.5):
         print(key)
         self.module = module
         self.input_size = NetworkLayerInvestigator.module_output_size(module)
@@ -35,6 +36,8 @@ class TaggerHook:
         self.num_labeled = 0
 
         self.label_targets = None
+
+        self.checkpoint = join('{}.{}.model'.format(save_prefix, self.key))
 
         #TODO inspect individual label performance
 
@@ -102,8 +105,12 @@ class TaggerHook:
             self.tagger.train()
             self.handle = module.register_forward_hook(self.training_hook)
 
+    def save_model(self, dir):
+        with open(self.checkpoint, 'wb') as file:
+            torch.save(self.tagger, file)
+
 class NetworkLayerInvestigator:
-    def __init__(self, model, output_vocab, batch_size, bptt):
+    def __init__(self, model, output_vocab, batch_size, bptt, save_prefix):
         self.hooks = {}
         self.model = model
         self.output_vocab = output_vocab
@@ -115,6 +122,8 @@ class NetworkLayerInvestigator:
 
         self.next_batch = 0
         self.batch_hook = None
+
+        self.save_prefix = save_prefix
 
     @staticmethod
     def module_output_size(module):
@@ -149,7 +158,7 @@ class NetworkLayerInvestigator:
                 continue
 
             if module_key not in self.hooks:
-                self.hooks[module_key] = TaggerHook(module_key, module, self.output_vocab)
+                self.hooks[module_key] = TaggerHook(module_key, module, self.output_vocab, self.save_prefix)
 
             # TODO use module.apply()
             self.hooks[module_key].register_hook(module, evaluation=self.evaluation)

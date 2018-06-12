@@ -39,6 +39,7 @@ parser.add_argument('--bptt', type=int, default=35,
 parser.add_argument('--batch-size', type=int, default=60)
 parser.add_argument('--test-length', type=int, default=None,
                     help='number of lines to test in the test corpus')
+parser.add_argument('--save-prefix', type=str)
 
 args = parser.parse_args()
 
@@ -110,7 +111,7 @@ criterion = nn.CrossEntropyLoss()
 # Run on test data.
 print("test data size ", test_data.size())
 
-investigator = hooks.NetworkLayerInvestigator(model, pos_corpus.dictionary, args.batch_size, args.bptt)
+investigator = hooks.NetworkLayerInvestigator(model, pos_corpus.dictionary, args.batch_size, args.bptt, args.save_prefix)
 
 def evaluate(data_source, test_pos_tags):
     ntokens = len(corpus.dictionary)
