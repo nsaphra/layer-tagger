@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
-from os.path import join
+from os.path import join, isfile
 
 import data
 
@@ -31,13 +31,14 @@ class TaggerHook:
         self.key = key
         self.handle = None
 
-        self.eval_loss = 0
+        self.cumulative_eval_loss = 0
         self.num_correct = 0
         self.num_labeled = 0
 
         self.label_targets = None
 
         self.checkpoint = join('{}.{}.model'.format(save_prefix, self.key))
+        self.best_validation_loss = None
 
         #TODO inspect individual label performance
 
@@ -69,11 +70,12 @@ class TaggerHook:
             return
 
         self.tagger.requires_grad = False
-        label_output = self.tagger(output)
-        label_predictions = torch.max(label_output.data, 1)
-        self.num_labeled += label_targets.size(0)
-        self.cumulative_loss += label_targets.size(0) * self.loss_function(label_output, self.label_targets).data
-        self.num_correct += (label_output == self.label_targets).sum()
+        prediction = self.tagger(activation)
+        prediction_flat = prediction.view(-1, self.output_size)
+        self.num_labeled += self.label_targets.size(0)
+        self.cumulative_eval_loss += self.label_targets.size(0) * self.criterion(prediction_flat, self.label_targets).data
+        label_predictions = torch.max(prediction_flat.data, 1)[1]
+        self.num_correct += (label_predictions == self.label_targets.data).sum()
 
     def process_activations(self, activations, sequence):
         if activations is None:
@@ -98,6 +100,12 @@ class TaggerHook:
     def register_hook(self, module, evaluation=True):
         if self.handle is not None:
             self.handle.remove()
+
+            self.cumulative_eval_loss = 0
+            self.num_correct = 0
+            self.num_labeled = 0
+
+            self.label_targets = None
         if evaluation:
             self.tagger.eval()
             self.handle = module.register_forward_hook(self.testing_hook)
@@ -105,9 +113,33 @@ class TaggerHook:
             self.tagger.train()
             self.handle = module.register_forward_hook(self.training_hook)
 
-    def save_model(self, dir):
+    def save_model(self):
         with open(self.checkpoint, 'wb') as file:
             torch.save(self.tagger, file)
+
+    def load_model(self):
+        if not isfile(self.checkpoint):
+            return
+        with open(self.checkpoint, 'rb') as file:
+            self.tagger = torch.load(file)
+
+    def save_best_model(self):
+        loss = self.compute_loss()
+        if loss is None:
+            return
+        if self.best_validation_loss is None or loss < self.best_validation_loss:
+            self.best_validation_loss = loss
+            self.save_model()
+
+    def compute_loss(self):
+        if self.num_labeled is 0:
+            return None
+        return self.cumulative_eval_loss[0] / self.num_labeled
+
+    def compute_accuracy(self):
+        if self.num_labeled is 0:
+            return None
+        return 100 * self.num_correct / self.num_labeled
 
 class NetworkLayerInvestigator:
     def __init__(self, model, output_vocab, batch_size, bptt, save_prefix):
@@ -163,10 +195,20 @@ class NetworkLayerInvestigator:
             # TODO use module.apply()
             self.hooks[module_key].register_hook(module, evaluation=self.evaluation)
 
+    def save_best_taggers(self):
+        # assumes that we have recently run a validation set, which is in the current results
+        for key, tagger in self.hooks.items():
+            tagger.save_best_model()
+
+    def load_best_taggers(self):
+        # run before running on official test set
+        for key, tagger in self.hooks.items():
+            tagger.load_model()
+
     def results_dict(self):
         for key, tagger in self.hooks.items():
             self.results[key] = {
-                'loss': tagger.cumulative_eval_loss / tagger.num_labeled,
-                'accuracy': 100 * tagger.num_correct / tagger.num_labeled
+                'loss': tagger.compute_loss(),
+                'accuracy': tagger.compute_accuracy()
             }
         return self.results

@@ -40,6 +40,9 @@ parser.add_argument('--batch-size', type=int, default=60)
 parser.add_argument('--test-length', type=int, default=None,
                     help='number of lines to test in the test corpus')
 parser.add_argument('--save-prefix', type=str)
+parser.add_argument('--epochs', type=int, default=20,
+                    help='upper epoch limit')
+parser.add_argument('--save-results', type=str)
 
 args = parser.parse_args()
 
@@ -91,11 +94,15 @@ def repackage_hidden(h):
         return tuple(repackage_hidden(v) for v in h)
 
 print('Batching eval text data.')
+train_data = batchify(corpus.train, args.batch_size)
+valid_data = batchify(corpus.valid, args.batch_size)
 test_data = batchify(corpus.test, args.batch_size)
 
 print('Batching eval pos data.')
 # TODO use permutation
 pos_corpus = data.Corpus(args.train_file+'.sem', args.valid_file+'.sem', args.test_file+'.sem', test_length=args.test_length)
+train_pos_tags = batchify(pos_corpus.train, args.batch_size)
+valid_pos_tags = batchify(pos_corpus.valid, args.batch_size)
 test_pos_tags = batchify(pos_corpus.test, args.batch_size)
 
 def get_pos_batch(source, i):
@@ -136,12 +143,31 @@ def evaluate(data_source, test_pos_tags):
 
     return {'loss': total_loss.data[0] / num_batches}
 
-investigator.add_model_hooks(evaluation=False)
+for epoch in range(1, args.epochs+1):
+    # run on train set
+    investigator.add_model_hooks(evaluation=False)
+    evaluate(train_data, train_pos_tags)
 
+    # run on validation set
+    investigator.add_model_hooks(evaluation=True)
+    evaluate(valid_data, valid_pos_tags)
+    investigator.save_best_taggers()
+    valid_loss = investigator.results_dict()
+    print(valid_loss)
+
+# run on test set
+investigator.load_best_taggers()
+investigator.add_model_hooks(evaluation=True)
 test_stats = evaluate(test_data, test_pos_tags)
+
 print('=' * 89)
+test_loss = investigator.results_dict()
+print(test_loss)
 print('| End | test ppl {:8.2f} | '.format(
       math.exp(test_stats['loss'])),
       ' | '.join(['{} {:5.2f}'.format(k, v) for k,v in test_stats.items()]),
       ' |')
 print('=' * 89)
+
+with open(args.save_results, 'w') as fh:
+    json.dump(test_loss, fh)
