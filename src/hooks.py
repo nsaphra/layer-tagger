@@ -7,26 +7,17 @@ from os.path import join, isfile
 import data
 
 class TaggerHook:
-    def __init__(self, key, module, output_vocab, save_prefix, hidden_size=None, dropout=0.5):
-        print(key)
+    def __init__(self, analyzer, key, module, output_vocab, save_prefix, hidden_size=None, dropout=0.5):
         self.module = module
-        self.input_size = NetworkLayerInvestigator.module_output_size(module)
         self.output_size = len(output_vocab)
+        self.hidden_size = hidden_size
+        self.input_size = None
+        self.dropout = dropout
+
+        self.tagger = None
+
         if hidden_size is None:
-            hidden_size = self.output_size  # as specified in belinkov et al.
-
-        self.tagger = nn.Sequential(
-            nn.Linear(self.input_size, hidden_size),
-            nn.Dropout(dropout),
-            nn.ReLU(),
-            nn.Linear(hidden_size, self.output_size)
-        )
-        self.tagger.cuda()
-
-        print(self.tagger)
-
-        self.criterion = nn.CrossEntropyLoss()
-        self.optimizer = torch.optim.SGD(self.tagger.parameters(), lr=0.001)
+             self.hidden_size = self.output_size  # as specified in belinkov et al.
 
         self.key = key
         self.handle = None
@@ -40,16 +31,31 @@ class TaggerHook:
         self.checkpoint = join('{}.{}.model'.format(save_prefix, self.key))
         self.best_validation_loss = None
 
+        self.analyzer = analyzer
+
         #TODO inspect individual label performance
+
+    def construct_model(self):
+        self.tagger = nn.Sequential(
+            nn.Linear(self.input_size, self.hidden_size),
+            nn.Dropout(self.dropout),
+            nn.ReLU(),
+            nn.Linear(self.hidden_size, self.output_size)
+        )
+        self.tagger.cuda()
+        self.tagger.train()
+
+        print(self.key)
+        print(self.tagger)
+
+        self.criterion = nn.CrossEntropyLoss()
+        self.optimizer = torch.optim.SGD(self.tagger.parameters(), lr=0.001)
 
     def set_batch(self, label_targets):
         self.label_targets = label_targets
 
     def training_hook(self, layer, input, output):
-        for activation in output:
-            activation = self.process_activations(activation, self.label_targets)
-            if activation is not None:
-                break  # use the first output that has the correct dimensions
+        activation = self.process_activations(output, self.label_targets)
         if activation is None:
             return
 
@@ -62,10 +68,7 @@ class TaggerHook:
         self.optimizer.step()
 
     def testing_hook(self, layer, input, output):
-        for activation in output:
-            activation = self.process_activations(activation, self.label_targets)
-            if activation is not None:
-                break  # use the first output that has the correct dimensions
+        activation = self.process_activations(output, self.label_targets)
         if activation is None:
             return
 
@@ -82,19 +85,33 @@ class TaggerHook:
             return None
 
         if type(activations) is tuple:
-            activations = torch.stack(activations, dim=0)
+            if type(activations[0]) is torch.cuda.FloatTensor:
+                activations = torch.stack(activations, dim=0)
+            else:
+                for output in activations:
+                    activation = self.process_activations(output, sequence)
+                    if activation is not None:
+                        return activation # use the first output that has the correct dimensions
+                return None
+        elif type(activations.data) is not torch.cuda.FloatTensor:
+            return None
 
-        if type(activations.data) is not torch.cuda.FloatTensor:
+        if activations.dim() > 3:
             return None
 
         if activations.dim() == 3 and (activations.size(0) * activations.size(1)) == (sequence.size(0)):
             # activations: sequence_length x batch_size x hidden_size
             activations = activations.view(sequence.size(0), -1)
-        if activations.size(0) != sequence.size(0) or activations.size(1) != self.input_size:
+
+        if activations.size(0) != sequence.size(0):
             return None
         # activations: (sequence_length * batch_size) x hidden_size
 
-        # rapid activations in a new Variable to block backprop
+        if self.input_size is None:
+            self.input_size = activations.size(1)
+            self.construct_model()
+
+        # wrap activations in a new Variable to block backprop
         return Variable(activations.data)
 
     def register_hook(self, module, evaluation=True):
@@ -110,7 +127,8 @@ class TaggerHook:
             self.tagger.eval()
             self.handle = module.register_forward_hook(self.testing_hook)
         else:
-            self.tagger.train()
+            if self.tagger is not None:
+                self.tagger.train()
             self.handle = module.register_forward_hook(self.training_hook)
 
     def save_model(self):
@@ -190,7 +208,7 @@ class NetworkLayerInvestigator:
                 continue
 
             if module_key not in self.hooks:
-                self.hooks[module_key] = TaggerHook(module_key, module, self.output_vocab, self.save_prefix)
+                self.hooks[module_key] = TaggerHook(self, module_key, module, self.output_vocab, self.save_prefix)
 
             # TODO use module.apply()
             self.hooks[module_key].register_hook(module, evaluation=self.evaluation)
