@@ -49,7 +49,7 @@ for filename in Path(args.data).glob('**/*.conll'):
     tokens_out = filename.with_suffix('.tok').open('w', encoding='utf-8')
     semantic_out = filename.with_suffix('.sem').open('w', encoding='utf-8')
     for (tokens, semantic_tags) in all_file_tags(filename):
-        print(' '.join(tokens), file=tokens_out)
+        print(' '.join(tokens).lower(), file=tokens_out)
         print(' '.join(semantic_tags), file=semantic_out)
     tokens_out.close()
     semantic_out.close()

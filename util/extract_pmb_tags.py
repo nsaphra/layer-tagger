@@ -66,7 +66,7 @@ for filename in Path(args.data).glob('**/en.drs.xml'):
     (tokens, semantic_tags, pos_tags) = all_file_tags(filename)
     if tokens == None:
         continue
-    print(' '.join(tokens), file=tokens_out)
+    print(' '.join(tokens).lower(), file=tokens_out)
     print(' '.join(semantic_tags), file=semantic_out)
     print(' '.join(pos_tags), file=pos_out)
 tokens_out.close()
