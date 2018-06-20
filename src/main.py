@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 import sys
 import os
 import numpy
@@ -43,6 +45,7 @@ parser.add_argument('--save-prefix', type=str)
 parser.add_argument('--epochs', type=int, default=20,
                     help='upper epoch limit')
 parser.add_argument('--save-results', type=str)
+parser.add_argument('--tag-suffix', type=str, default='.tag')
 
 args = parser.parse_args()
 
@@ -100,7 +103,7 @@ test_data = batchify(corpus.test, args.batch_size)
 
 print('Batching eval pos data.')
 # TODO use permutation
-pos_corpus = data.Corpus(args.train_file+'.sem', args.valid_file+'.sem', args.test_file+'.sem', test_length=args.test_length)
+pos_corpus = data.Corpus(args.train_file+args.tag_suffix, args.valid_file+args.tag_suffix, args.test_file+args.tag_suffix, test_length=args.test_length)
 train_pos_tags = batchify(pos_corpus.train, args.batch_size)
 valid_pos_tags = batchify(pos_corpus.valid, args.batch_size)
 test_pos_tags = batchify(pos_corpus.test, args.batch_size)
