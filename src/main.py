@@ -145,6 +145,7 @@ def evaluate(data_source, test_pos_tags):
             num_batches, elapsed * 1000 / num_batches))
 
     return {'loss': total_loss.data[0] / num_batches}
+results_file = open(args.save_results, 'w')
 
 for epoch in range(1, args.epochs+1):
     # run on train set
@@ -172,5 +173,4 @@ print('| End | test ppl {:8.2f} | '.format(
       ' |')
 print('=' * 89)
 
-with open(args.save_results, 'w') as fh:
-    json.dump(test_loss, fh)
+json.dump(test_loss, results_file)
